@@ -1,4 +1,10 @@
-Changes from 12/2025 to 2 January 2025: 
+Changes from 1/2026 to 3 February 2026: 
+1. Changed dataset to include larger dataset (12,000 samples) with RGB and Edge Segmented images (including CSV that has ~3000 samples for four directions).
+2. Changed image dimensions to be converted to 256-dimensions.
+3. Increased epoch size from 20, to 100, 180, 200....to 1000. Will continue to experimengt with epoch size, current 1000 epoch size gives much higher accuracy results (comparing 65% to ~84%).
+4. The model now learns from one single graph, rather than many. This drastically increased the accuracy. 
+
+Changes from 12/2025 to 2 January 2026: 
 1. Changed the dataset to Natnael's.
 2. Added feature to building_graph.py to make it so that CNN feature extractor can be changed.
 3. Changed train.py to have configuration functon so that changes can be made (can change learning rate, epochs, and training split). 
