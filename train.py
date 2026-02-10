@@ -9,6 +9,7 @@ from torch_geometric.loader import DataLoader
 from sklearn.model_selection import KFold
 import time
 from dataset import NavGraphDataset
+from plot import plot_graph
 from GNNmodel import GNN  
 
 CSVpath = "labels.csv"
@@ -28,7 +29,7 @@ LR = experiment_configuration["learningRate"]
 hiddenDimension = experiment_configuration["hiddenDimension"]
 
 
-def train_with_cross_validation(k_folds=5):
+def train_with_cross_validation(k_folds=4):
     dataset = NavGraphDataset(CSVpath, imageDirectory, device)
     data = dataset.get_graph().to(device)
 
@@ -85,6 +86,8 @@ def train_with_cross_validation(k_folds=5):
         f"Mean Accuracy: {sum(fold_accuracies)/len(fold_accuracies):.2f}% ± "
         f"{torch.std(torch.tensor(fold_accuracies)):.2f}"
     )
+    return data
+
 
 
 def evaluate(model, loader):
@@ -99,17 +102,15 @@ def evaluate(model, loader):
             total += batch.y.size(0)
     return 100.0 * correct / total if total > 0 else 0
 
-
 if __name__ == "__main__":
     start_time = time.perf_counter()
-    train_with_cross_validation(k_folds=5)
+    data=train_with_cross_validation(k_folds=4)
     end_time = time.perf_counter()
+    plot_graph(data)
     print("Total runtime: ", end_time - start_time, " seconds")
 
 """
-RESULTS: 10 February 2026
-
-Cross-Validation Results
+Cross-Validation Results k=5
 Fold Accuracies: 
 [64.45473432540894, 
 63.046836853027344, 
