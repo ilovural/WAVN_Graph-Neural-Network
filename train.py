@@ -28,7 +28,7 @@ LR = experiment_configuration["learningRate"]
 hiddenDimension = experiment_configuration["hiddenDimension"]
 
 
-def train_with_cross_validation(k_folds=4):
+def train_with_cross_validation(k_folds=5):
     dataset = NavGraphDataset(CSVpath, imageDirectory, device)
     data = dataset.get_graph().to(device)
 
@@ -102,7 +102,7 @@ def evaluate(model, loader):
 
 if __name__ == "__main__":
     start_time = time.perf_counter()
-    train_with_cross_validation(k_folds=4)
+    train_with_cross_validation(k_folds=5)
     end_time = time.perf_counter()
     print("Total runtime: ", end_time - start_time, " seconds")
 
