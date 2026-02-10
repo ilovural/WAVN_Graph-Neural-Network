@@ -12,11 +12,12 @@ import torchvision.models as models
 from torch_geometric.data import Data
 from PIL import Image
 
-# CNN featur extractor (options)
-def get_feature_extractor(backbone_name: str, device):
+# CNN feature extractor (creates various options: ResNet, EfficientNet, MobileNet)
+def get_feature_extractor(backbone_name: str, device, target_dim=256):
     """
     Returns:
         feature_extractor (nn.Module)
+        projection (nn.Module)
         output_feature_dim (int)
     """
 
@@ -47,31 +48,55 @@ def get_feature_extractor(backbone_name: str, device):
         out_dim = 1280
 
     else:
-        raise ValueError(f"Unknown backbone: {backbone_name}")
+        raise ValueError("Unknown feature extractor")
 
-    extractor.eval().to(device)
-    return extractor, out_dim
+    #converts backbone features into fixed-size (256-dimensional) for standardisation
+    projection = torch.nn.Linear(out_dim, target_dim)
+
+    extractor.eval().to(device) #no drop-out, moves to CPU/GPU
+    projection.to(device) #moves projection layer to same device as extractor
+
+    return extractor, projection, target_dim #components necessary for ftr extraction
 
 
-# image to feature vetcor
-def ExtractImageFeatures(imagePath, model, transform, device):
+
+# converts image fileto feature vetcor
+def ExtractImageFeatures(imagePath, model, projection, transform, device):
     image = Image.open(imagePath).convert("RGB")
-    image = transform(image).unsqueeze(0).to(device)
+    image = transform(image).unsqueeze(0).to(device) #preprocessing
 
-    with torch.no_grad():
+    with torch.no_grad(): #disables gradient computation for inference speed-up
         features = model(image)
+        features = torch.flatten(features, start_dim=1)
+        features = projection(features)
 
-    features = torch.flatten(features, start_dim=1)
     return features.squeeze(0)
 
-#graph builder
-def BuildGraphFromCSV(csv_df, imageDirectory, labelMap, device):
-    '''TO SWITCH CNN BACKBONES LOOK AT LINE BELOW!!!'''
-    backbone_name = "efficientnet_b0"   # TO SWITCH CNN BACKBONES 
-    featureExtractor, feature_dim = get_feature_extractor(backbone_name, device)
+#filename handling for image files (choosing from images/rgb, need to integrate /edges)
+def resolve_image_path(imageDirectory, base_name):
+    rgb_dir = os.path.join(imageDirectory, "rgb")
+    search_dir = rgb_dir if os.path.exists(rgb_dir) else imageDirectory
 
-    print(f"Using CNN Feature Extractor: {backbone_name} ({feature_dim}D)")
+    for f in os.listdir(search_dir):
+        if f.startswith(base_name) and f.endswith(".png"):
+            return os.path.join(search_dir, f)
 
+    raise FileNotFoundError(
+        f"No RGB image found for base name '{base_name}' in {search_dir}"
+    )
+
+
+#graph builder for PyTorch Geometric Graph
+def BuildGlobalGraphFromCSV(csv_df, imageDirectory, labelMap, device):
+    backbone_name = "efficientnet_b0" #TO CHANGE IMAGE EXTRACTING MODEL
+    
+    #initailises
+    featureExtractor, projection, feature_dim = get_feature_extractor(
+        backbone_name, device
+    )
+    print(f"Using CNN Feature Extractor: {backbone_name} with {feature_dim}D")
+
+    #image preprocessing
     transform = T.Compose([
         T.Resize((224, 224)),
         T.ToTensor(),
@@ -81,39 +106,47 @@ def BuildGraphFromCSV(csv_df, imageDirectory, labelMap, device):
         ),
     ])
 
-    dataList = []
+    node_features = []
+    edge_index = []
+    edge_labels = []
+
+    node_id_map = {}   # image_path → node index
     cache = {}
 
+    def get_node_id(image_path):
+        if image_path not in node_id_map:
+            node_id_map[image_path] = len(node_features)
+
+            if image_path not in cache:
+                cache[image_path] = ExtractImageFeatures(
+                    image_path, featureExtractor, projection, transform, device
+                )
+
+            node_features.append(cache[image_path])
+        return node_id_map[image_path]
+
+    #CSV iteration
     for _, row in csv_df.iterrows():
-        currentImage = row["current_image"].replace(".png", "_hed.png")
-        destinationImage = row["destination_image"].replace(".png", "_hed.png")
-        direction = row["direction"]
+        currentPath = resolve_image_path(imageDirectory, row["current_image"])
+        destinationPath = resolve_image_path(imageDirectory, row["destination_image"])
 
-        currentPath = os.path.join(imageDirectory, currentImage)
-        destinationPath = os.path.join(imageDirectory, destinationImage)
+        src = get_node_id(currentPath)
+        dst = get_node_id(destinationPath)
 
-        # validate paths BEFORE loading
-        if not os.path.exists(currentPath):
-            raise FileNotFoundError(f"Missing image: {currentPath}")
-        if not os.path.exists(destinationPath):
-            raise FileNotFoundError(f"Missing image: {destinationPath}")
+        # directed edge
+        edge_index.append([src, dst])
+        edge_labels.append(labelMap[row["direction"]])
 
-        if currentImage not in cache:
-            cache[currentImage] = ExtractImageFeatures(
-                currentPath, featureExtractor, transform, device
-            )
+    #for tensor conversion (converts node features into a tensor...edge list/labels into PyG format)
+    x = torch.stack(node_features)
+    edge_index = torch.tensor(edge_index, dtype=torch.long).t().contiguous()
+    edge_labels = torch.tensor(edge_labels, dtype=torch.long)
 
-        if destinationImage not in cache:
-            cache[destinationImage] = ExtractImageFeatures(
-                destinationPath, featureExtractor, transform, device
-            )
+    #creation of graph object
+    data = Data(
+        x=x,
+        edge_index=edge_index,
+        edge_attr=edge_labels   # direction labels of edges
+    )
 
-        # two-node graph
-        x = torch.stack([cache[currentImage], cache[destinationImage]])
-        edge_index = torch.tensor([[0, 1], [1, 0]], dtype=torch.long)
-        y = torch.tensor([labelMap[direction]], dtype=torch.long)
-
-        data = Data(x=x, edge_index=edge_index, y=y)
-        dataList.append(data)
-
-    return dataList
+    return data
