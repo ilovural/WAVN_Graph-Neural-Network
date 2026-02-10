@@ -4,32 +4,34 @@ Notes: the class GNN is a simple 2-layer GCN that is followed by a global poolin
 Global Pooling - technique that aggregates the features from all of the nodes in a graph into a single, fixed-size vector that represents the entire graph
 Linear Classification Head - a simple, fully connected layer that takes the final learned node or graph representations and maps them to the desired output classes
 '''
-
-import torch 
+import torch
 import torch.nn.functional as F
-from torch_geometric.nn import GCNConv, global_mean_pool
+from torch_geometric.nn import GCNConv
 
-class GNN(torch.nn.Module): #PyTorch model
-    def __init__(self, inChannels, hiddenChannels, numClasses): #creating layers 
-        super(GNN, self).__init__()
-        #GCN layer one: transform input node features
-        self.conv1=GCNConv(inChannels, hiddenChannels)
-        #GCN layer two: refines node embeddings
-        self.conv2=GCNConv(hiddenChannels, hiddenChannels)
-        #classification head 
-        self.lin=torch.nn.Linear(hiddenChannels, numClasses)
+class GNN(torch.nn.Module):
+    #initialising model
+    def __init__(self, inChannels, hiddenChannels, numClasses, dropout=0.5):
+        super().__init__()
+        self.conv1 = GCNConv(inChannels, hiddenChannels)  # Layer 1
+        self.conv2 = GCNConv(hiddenChannels, hiddenChannels)  # Layer 2
+        self.dropout = dropout
+        self.edge_mlp = torch.nn.Sequential(
+            torch.nn.Linear(hiddenChannels * 2, hiddenChannels),
+            torch.nn.ReLU(),  # Non-linearity
+            torch.nn.Dropout(dropout),
+            torch.nn.Linear(hiddenChannels, numClasses)
+        )
 
-    def forward(self, x, edge_index, batch): #defining how the model processes the graph
-        #pass through each network, [numNodes, inChannels] is the node feature matric (x)
-        #edgeIndex is the graph connectivity and the batch is the graph index per node
-        #each update of GCN is done by nodes mixing its own features and the features of its neighbors.
-        x=self.conv1(x, edge_index)
-        x=F.relu(x)
-        x=self.conv2(x, edge_index)
-        x=F.relu(x)
+    # Forward method must be at class level, not inside __init__
+    def forward(self, x, edge_index):
+        #node embeddings
+        x = F.relu(self.conv1(x, edge_index))
+        x = F.dropout(x, p=self.dropout, training=self.training)
+        x = F.relu(self.conv2(x, edge_index))
 
-        #graph level embedding (gobal mean pooling)
-        x=global_mean_pool(x, batch)
-        #linear classification
-        x=self.lin(x)
-        return F.log_softmax(x, dim=1)
+        #edge embeddings
+        src, dst = edge_index
+        edge_features = torch.cat([x[src], x[dst]], dim=1)
+
+        #edge-level logits
+        return self.edge_mlp(edge_features)
