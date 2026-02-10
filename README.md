@@ -1,3 +1,7 @@
+Changes from 3 February 2026 to 10 February 2026: 
+1. Added cross-validation (k-folds).
+2. Working on creating visuals of graph.
+
 Changes from 1/2026 to 3 February 2026: 
 1. Changed dataset to include larger dataset (12,000 samples) with RGB and Edge Segmented images (including CSV that has ~3000 samples for four directions).
 2. Changed image dimensions to be converted to 256-dimensions.
